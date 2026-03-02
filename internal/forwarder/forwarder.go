@@ -56,17 +56,27 @@ func New(s store.Store, breaker *circuitbreaker.Breaker) *Forwarder {
 
 // Forward sends the webhook payload to the route's destination and records the delivery.
 func (f *Forwarder) Forward(ctx context.Context, route router.MatchedRoute, eventType string, deliveryID string, payload []byte) *webhook.ForwardResult {
-	// Check circuit breaker — skip delivery if destination is unreachable.
+	// Check circuit breaker — skip HTTP call if destination is unreachable,
+	// but still store the delivery with payload for later retry.
 	if !f.breaker.Allow(route.DestinationURL) {
+		nr := time.Now().Add(5 * time.Minute) // retry after cooldown period
+		var expiresAt *time.Time
+		if route.MaxAge > 0 {
+			t := time.Now().Add(route.MaxAge)
+			expiresAt = &t
+		}
 		d := &store.Delivery{
 			ID:             uuid.New().String(),
 			RouteName:      route.Name,
 			EventType:      eventType,
 			DeliveryID:     deliveryID,
+			Payload:        payload,
 			DestinationURL: route.DestinationURL,
 			Status:         "circuit_open",
 			Attempt:        0,
 			MaxAttempts:    route.MaxAttempts,
+			ExpiresAt:      expiresAt,
+			NextRetryAt:    &nr,
 			CreatedAt:      time.Now(),
 			UpdatedAt:      time.Now(),
 		}
@@ -138,6 +148,11 @@ func (f *Forwarder) Forward(ctx context.Context, route router.MatchedRoute, even
 
 // Retry re-sends a previously failed delivery. It satisfies retry.ForwarderInterface.
 func (f *Forwarder) Retry(ctx context.Context, delivery *store.Delivery) error {
+	// Check circuit breaker — if still open, return error to reschedule.
+	if !f.breaker.Allow(delivery.DestinationURL) {
+		return fmt.Errorf("circuit open for %s", delivery.DestinationURL)
+	}
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, delivery.DestinationURL, bytes.NewReader(delivery.Payload))
 	if err != nil {
 		return fmt.Errorf("creating retry request: %w", err)

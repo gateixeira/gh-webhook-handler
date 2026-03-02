@@ -74,6 +74,8 @@ func (e *Engine) processBatch(ctx context.Context) {
 			continue
 		}
 
+		wasCircuitOpen := d.Status == "circuit_open"
+
 		// Mark as retrying.
 		d.Status = "retrying"
 		d.UpdatedAt = time.Now()
@@ -84,7 +86,7 @@ func (e *Engine) processBatch(ctx context.Context) {
 
 		// Attempt re-delivery.
 		if err := e.forwarder.Retry(ctx, d); err != nil {
-			e.handleFailure(d, err)
+			e.handleFailure(d, err, wasCircuitOpen)
 			continue
 		}
 
@@ -100,9 +102,23 @@ func (e *Engine) processBatch(ctx context.Context) {
 	}
 }
 
-func (e *Engine) handleFailure(d *store.Delivery, retryErr error) {
-	d.Attempt++
+func (e *Engine) handleFailure(d *store.Delivery, retryErr error, wasCircuitOpen bool) {
 	d.UpdatedAt = time.Now()
+
+	// If the circuit is open, don't count this as a real attempt —
+	// the HTTP call was never made. Reschedule for later.
+	if wasCircuitOpen {
+		d.Status = "circuit_open"
+		next := time.Now().Add(5 * time.Minute)
+		d.NextRetryAt = &next
+		log.Printf("retry: delivery %s circuit still open for %s, rescheduled", d.ID, d.DestinationURL)
+		if err := e.store.Update(d); err != nil {
+			log.Printf("retry: failed to update delivery %s: %v", d.ID, err)
+		}
+		return
+	}
+
+	d.Attempt++
 
 	if d.Attempt >= d.MaxAttempts {
 		d.Status = "permanently_failed"

@@ -125,7 +125,7 @@ func (s *SQLiteStore) GetRetryable(now time.Time) ([]Delivery, error) {
 		delivery_id, payload_hash, payload, destination_url, status, response_code,
 		response_body, attempt, max_attempts, expires_at, next_retry_at, created_at, updated_at
 		FROM deliveries
-		WHERE status = 'failed' AND next_retry_at <= ? AND attempt < max_attempts
+		WHERE status IN ('failed', 'circuit_open') AND next_retry_at <= ? AND attempt < max_attempts
 		AND (expires_at IS NULL OR expires_at > ?)
 		ORDER BY next_retry_at ASC
 		LIMIT 100`, now.UTC().Format("2006-01-02 15:04:05"), now.UTC().Format("2006-01-02 15:04:05"))
