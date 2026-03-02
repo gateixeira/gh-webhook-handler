@@ -64,12 +64,18 @@ func (f *Forwarder) Forward(ctx context.Context, route router.MatchedRoute, even
 		nextRetry = &nr
 	}
 
+	// Only store payload for failed deliveries to minimize DB size growth.
+	var storedPayload []byte
+	if !result.Success {
+		storedPayload = payload
+	}
+
 	d := &store.Delivery{
 		ID:             uuid.New().String(),
 		RouteName:      route.Name,
 		EventType:      eventType,
 		DeliveryID:     deliveryID,
-		Payload:        payload,
+		Payload:        storedPayload,
 		DestinationURL: route.DestinationURL,
 		Status:         status,
 		ResponseCode:   result.StatusCode,

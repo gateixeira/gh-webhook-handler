@@ -188,3 +188,86 @@ func TestUpdateChangesStatusAndUpdatedAt(t *testing.T) {
 		t.Errorf("updated_at did not advance: before=%v after=%v", before.UpdatedAt, after.UpdatedAt)
 	}
 }
+
+func TestDeleteOlderThan(t *testing.T) {
+	s := newTestStore(t)
+
+	for _, id := range []string{"d-1", "d-2", "d-3"} {
+		if err := s.Create(&Delivery{
+			ID: id, RouteName: "r", EventType: "push",
+			DestinationURL: "https://a.com", Status: "success",
+			Attempt: 1, MaxAttempts: 3,
+		}); err != nil {
+			t.Fatalf("Create %s: %v", id, err)
+		}
+	}
+
+	oldTime := time.Now().UTC().Add(-48 * time.Hour).Format("2006-01-02 15:04:05")
+	for _, id := range []string{"d-1", "d-2"} {
+		if _, err := s.db.Exec("UPDATE deliveries SET updated_at = ? WHERE id = ?", oldTime, id); err != nil {
+			t.Fatalf("backdate %s: %v", id, err)
+		}
+	}
+
+	cutoff := time.Now().UTC().Add(-24 * time.Hour)
+	n, err := s.DeleteOlderThan("success", cutoff)
+	if err != nil {
+		t.Fatalf("DeleteOlderThan: %v", err)
+	}
+	if n != 2 {
+		t.Errorf("deleted %d, want 2", n)
+	}
+
+	if _, err := s.Get("d-3"); err != nil {
+		t.Errorf("d-3 should still exist: %v", err)
+	}
+	for _, id := range []string{"d-1", "d-2"} {
+		if _, err := s.Get(id); err == nil {
+			t.Errorf("%s should have been deleted", id)
+		}
+	}
+}
+
+func TestClearPayloadsOlderThan(t *testing.T) {
+	s := newTestStore(t)
+
+	for _, id := range []string{"d-1", "d-2"} {
+		if err := s.Create(&Delivery{
+			ID: id, RouteName: "r", EventType: "push",
+			DestinationURL: "https://a.com", Status: "permanently_failed",
+			Payload: []byte("payload-data"), Attempt: 3, MaxAttempts: 3,
+		}); err != nil {
+			t.Fatalf("Create %s: %v", id, err)
+		}
+	}
+
+	oldTime := time.Now().UTC().Add(-48 * time.Hour).Format("2006-01-02 15:04:05")
+	if _, err := s.db.Exec("UPDATE deliveries SET updated_at = ? WHERE id = ?", oldTime, "d-1"); err != nil {
+		t.Fatalf("backdate d-1: %v", err)
+	}
+
+	cutoff := time.Now().UTC().Add(-24 * time.Hour)
+	n, err := s.ClearPayloadsOlderThan("permanently_failed", cutoff)
+	if err != nil {
+		t.Fatalf("ClearPayloadsOlderThan: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("cleared %d, want 1", n)
+	}
+
+	d1, err := s.Get("d-1")
+	if err != nil {
+		t.Fatalf("Get d-1: %v", err)
+	}
+	if d1.Payload != nil {
+		t.Error("d-1 payload should be nil")
+	}
+
+	d2, err := s.Get("d-2")
+	if err != nil {
+		t.Fatalf("Get d-2: %v", err)
+	}
+	if d2.Payload == nil {
+		t.Error("d-2 payload should still have data")
+	}
+}

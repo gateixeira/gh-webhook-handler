@@ -144,6 +144,26 @@ func (s *SQLiteStore) GetRetryable(now time.Time) ([]Delivery, error) {
 	return deliveries, rows.Err()
 }
 
+func (s *SQLiteStore) DeleteOlderThan(status string, before time.Time) (int64, error) {
+	result, err := s.db.Exec(
+		"DELETE FROM deliveries WHERE status = ? AND updated_at < ?",
+		status, before.UTC().Format("2006-01-02 15:04:05"))
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+func (s *SQLiteStore) ClearPayloadsOlderThan(status string, before time.Time) (int64, error) {
+	result, err := s.db.Exec(
+		"UPDATE deliveries SET payload = NULL, updated_at = datetime('now') WHERE status = ? AND payload IS NOT NULL AND updated_at < ?",
+		status, before.UTC().Format("2006-01-02 15:04:05"))
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 func (s *SQLiteStore) Close() error {
 	return s.db.Close()
 }

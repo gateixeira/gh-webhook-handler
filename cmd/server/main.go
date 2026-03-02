@@ -13,6 +13,7 @@ import (
 	"github.com/gateixeira/gh-webhook-handler/internal/admin"
 	"github.com/gateixeira/gh-webhook-handler/internal/config"
 	"github.com/gateixeira/gh-webhook-handler/internal/forwarder"
+	"github.com/gateixeira/gh-webhook-handler/internal/reaper"
 	"github.com/gateixeira/gh-webhook-handler/internal/retry"
 	"github.com/gateixeira/gh-webhook-handler/internal/router"
 	"github.com/gateixeira/gh-webhook-handler/internal/store"
@@ -81,6 +82,10 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go retryEngine.Start(ctx)
+
+	// Start delivery reaper
+	deliveryReaper := reaper.New(deliveryStore, reaper.DefaultConfig())
+	go deliveryReaper.Start(ctx)
 
 	// Start config watcher
 	watcher := config.NewWatcher(*configPath, cfg, eventRouter)

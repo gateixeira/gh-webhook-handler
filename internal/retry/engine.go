@@ -13,9 +13,6 @@ import (
 // the implementation is responsible for constructing the outbound HTTP
 // request (destination URL, headers, payload, etc.).
 //
-// NOTE: For retry to work the Delivery record must carry the original
-// request payload. A "Payload []byte" field should be added to
-// store.Delivery so the engine can supply it here.
 type ForwarderInterface interface {
 	Retry(ctx context.Context, delivery *store.Delivery) error
 }
@@ -78,8 +75,9 @@ func (e *Engine) processBatch(ctx context.Context) {
 			continue
 		}
 
-		// Success.
+		// Success — clear payload to free storage.
 		d.Status = "success"
+		d.Payload = nil
 		d.UpdatedAt = time.Now()
 		if err := e.store.Update(d); err != nil {
 			log.Printf("retry: failed to mark delivery %s as success: %v", d.ID, err)

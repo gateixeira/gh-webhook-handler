@@ -40,5 +40,7 @@ type Store interface {
 	Get(id string) (*Delivery, error)
 	List(filter ListFilter) ([]Delivery, error)
 	GetRetryable(now time.Time) ([]Delivery, error)
+	DeleteOlderThan(status string, before time.Time) (int64, error)
+	ClearPayloadsOlderThan(status string, before time.Time) (int64, error)
 	Close() error
 }
