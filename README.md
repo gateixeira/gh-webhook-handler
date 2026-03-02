@@ -84,6 +84,7 @@ routes:
     retry:
       max_attempts: 5
       backoff: "exponential"  # exponential | linear | fixed
+      max_age: "2h"           # stop retrying after 2 hours
 ```
 
 ### Config Fields
@@ -100,6 +101,7 @@ routes:
 | `destination.headers` | No | Additional HTTP headers |
 | `retry.max_attempts` | No | Max retry attempts (default: 3) |
 | `retry.backoff` | No | Backoff strategy: `exponential`, `linear`, `fixed` |
+| `retry.max_age` | No | Stop retrying after this duration (e.g. `"2h"`, `"30m"`) |
 
 ### Config Hot-Reload
 
@@ -122,6 +124,8 @@ The service polls the config directory every 30 seconds. When YAML files change,
 | `GET` | `/api/deliveries/{id}` | Get delivery details |
 | `POST` | `/api/deliveries/{id}/retrigger` | Retrigger a failed delivery |
 | `GET` | `/api/routes` | List currently loaded routes |
+| `GET` | `/api/circuits` | List circuit breaker states for all destinations |
+| `POST` | `/api/circuits/reset?url=X` | Manually reset (close) a circuit breaker |
 
 ## Retry & Recovery
 
@@ -131,7 +135,17 @@ Failed deliveries are automatically retried by a background engine:
 - **Linear backoff**: 10s, 20s, 30s, 40s, ... (capped at 1 hour)
 - **Fixed backoff**: 30s intervals
 
-The original payload is stored in SQLite, enabling retries even after service restart. Deliveries that exhaust all retry attempts are marked as `permanently_failed` and can be manually retriggered via the admin API.
+Payloads are only stored for failed deliveries and cleared after successful retry, keeping database size manageable. Deliveries that exhaust all retry attempts are marked as `permanently_failed`. Stale events past their `max_age` are marked as `expired`. Both can be manually retriggered via the admin API.
+
+### Circuit Breaker
+
+A per-destination circuit breaker prevents wasting resources on permanently unreachable endpoints:
+
+- After **5 consecutive failures**, the circuit **opens** — new deliveries are immediately recorded as `circuit_open` without attempting the HTTP call
+- After a **5-minute cooldown**, the circuit enters **half-open** state and allows one probe request
+- If the probe **succeeds**, the circuit closes and normal delivery resumes
+- If the probe **fails**, the circuit reopens for another cooldown period
+- Circuits can be inspected via `GET /api/circuits` and manually reset via `POST /api/circuits/reset?url=X`
 
 ## GitHub App Setup
 
@@ -153,6 +167,8 @@ gh-webhook-handler/
 │   ├── forwarder/               # HTTP forwarding, outbound signing
 │   ├── store/                   # SQLite delivery tracking
 │   ├── retry/                   # Background retry engine, backoff strategies
+│   ├── reaper/                  # Delivery cleanup with retention policies
+│   ├── circuitbreaker/          # Per-destination circuit breaker
 │   ├── admin/                   # Admin REST API
 │   └── github/                  # GitHub App auth (JWT, installation tokens)
 ├── configs/                     # Example route configurations

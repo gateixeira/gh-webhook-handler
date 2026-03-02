@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/gateixeira/gh-webhook-handler/internal/circuitbreaker"
 	"github.com/gateixeira/gh-webhook-handler/internal/router"
 	"github.com/gateixeira/gh-webhook-handler/internal/store"
 	"github.com/gateixeira/gh-webhook-handler/internal/webhook"
@@ -32,12 +33,13 @@ type Result struct {
 
 // Forwarder forwards webhook payloads to destination URLs.
 type Forwarder struct {
-	client *http.Client
-	store  store.Store
+	client  *http.Client
+	store   store.Store
+	breaker *circuitbreaker.Breaker
 }
 
-// New creates a new Forwarder with the given store.
-func New(s store.Store) *Forwarder {
+// New creates a new Forwarder with the given store and circuit breaker.
+func New(s store.Store, breaker *circuitbreaker.Breaker) *Forwarder {
 	return &Forwarder{
 		client: &http.Client{
 			Timeout: forwardTimeout,
@@ -47,13 +49,44 @@ func New(s store.Store) *Forwarder {
 				IdleConnTimeout:     90 * time.Second,
 			},
 		},
-		store: s,
+		store:   s,
+		breaker: breaker,
 	}
 }
 
 // Forward sends the webhook payload to the route's destination and records the delivery.
 func (f *Forwarder) Forward(ctx context.Context, route router.MatchedRoute, eventType string, deliveryID string, payload []byte) *webhook.ForwardResult {
+	// Check circuit breaker — skip delivery if destination is unreachable.
+	if !f.breaker.Allow(route.DestinationURL) {
+		d := &store.Delivery{
+			ID:             uuid.New().String(),
+			RouteName:      route.Name,
+			EventType:      eventType,
+			DeliveryID:     deliveryID,
+			DestinationURL: route.DestinationURL,
+			Status:         "circuit_open",
+			Attempt:        0,
+			MaxAttempts:    route.MaxAttempts,
+			CreatedAt:      time.Now(),
+			UpdatedAt:      time.Now(),
+		}
+		_ = f.store.Create(d)
+
+		return &webhook.ForwardResult{
+			Route:      route,
+			StatusCode: 0,
+			Err:        fmt.Errorf("circuit open for %s", route.DestinationURL),
+		}
+	}
+
 	result := f.doForward(ctx, route, eventType, deliveryID, payload)
+
+	// Record success/failure in circuit breaker.
+	if result.Success {
+		f.breaker.RecordSuccess(route.DestinationURL)
+	} else {
+		f.breaker.RecordFailure(route.DestinationURL)
+	}
 
 	// Record delivery in store.
 	status := "success"
@@ -123,10 +156,13 @@ func (f *Forwarder) Retry(ctx context.Context, delivery *store.Delivery) error {
 	delivery.ResponseCode = resp.StatusCode
 	delivery.ResponseBody = string(body)
 
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("destination returned %d", resp.StatusCode)
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		f.breaker.RecordSuccess(delivery.DestinationURL)
+		return nil
 	}
-	return nil
+
+	f.breaker.RecordFailure(delivery.DestinationURL)
+	return fmt.Errorf("destination returned %d", resp.StatusCode)
 }
 
 func (f *Forwarder) doForward(ctx context.Context, route router.MatchedRoute, eventType string, deliveryID string, payload []byte) *Result {

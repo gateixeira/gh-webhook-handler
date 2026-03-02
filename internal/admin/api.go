@@ -6,19 +6,21 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/gateixeira/gh-webhook-handler/internal/circuitbreaker"
 	"github.com/gateixeira/gh-webhook-handler/internal/config"
 	"github.com/gateixeira/gh-webhook-handler/internal/store"
 )
 
 // API provides admin REST endpoints for inspecting deliveries and routes.
 type API struct {
-	store store.Store
-	cfg   *config.Config
+	store   store.Store
+	cfg     *config.Config
+	breaker *circuitbreaker.Breaker
 }
 
 // NewAPI creates an admin API handler.
-func NewAPI(s store.Store, cfg *config.Config) *API {
-	return &API{store: s, cfg: cfg}
+func NewAPI(s store.Store, cfg *config.Config, breaker *circuitbreaker.Breaker) *API {
+	return &API{store: s, cfg: cfg, breaker: breaker}
 }
 
 // RegisterRoutes attaches the admin endpoints to the given ServeMux.
@@ -27,6 +29,8 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/deliveries/{id}", a.getDelivery)
 	mux.HandleFunc("POST /api/deliveries/{id}/retrigger", a.retriggerDelivery)
 	mux.HandleFunc("GET /api/routes", a.listRoutes)
+	mux.HandleFunc("GET /api/circuits", a.listCircuits)
+	mux.HandleFunc("POST /api/circuits/reset", a.resetCircuit)
 }
 
 func (a *API) listDeliveries(w http.ResponseWriter, r *http.Request) {
@@ -94,6 +98,20 @@ func (a *API) retriggerDelivery(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) listRoutes(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, a.cfg.Routes())
+}
+
+func (a *API) listCircuits(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, a.breaker.List())
+}
+
+func (a *API) resetCircuit(w http.ResponseWriter, r *http.Request) {
+	url := r.URL.Query().Get("url")
+	if url == "" {
+		writeError(w, http.StatusBadRequest, "url query parameter is required")
+		return
+	}
+	a.breaker.Reset(url)
+	writeJSON(w, http.StatusOK, map[string]string{"status": "reset", "url": url})
 }
 
 // --- helpers ---

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gateixeira/gh-webhook-handler/internal/admin"
+	"github.com/gateixeira/gh-webhook-handler/internal/circuitbreaker"
 	"github.com/gateixeira/gh-webhook-handler/internal/config"
 	"github.com/gateixeira/gh-webhook-handler/internal/forwarder"
 	"github.com/gateixeira/gh-webhook-handler/internal/reaper"
@@ -55,11 +56,12 @@ func main() {
 	defer deliveryStore.Close()
 
 	// Initialize components
+	breaker := circuitbreaker.New()
 	eventRouter := router.New(cfg)
-	eventForwarder := forwarder.New(deliveryStore)
+	eventForwarder := forwarder.New(deliveryStore, breaker)
 	retryEngine := retry.NewEngine(deliveryStore, eventForwarder)
 	webhookHandler := webhook.NewHandler(*webhookSecret, eventRouter, eventForwarder, deliveryStore)
-	adminAPI := admin.NewAPI(deliveryStore, cfg)
+	adminAPI := admin.NewAPI(deliveryStore, cfg, breaker)
 
 	// Build HTTP mux
 	mux := http.NewServeMux()
