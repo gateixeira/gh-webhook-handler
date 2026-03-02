@@ -11,32 +11,18 @@ routes:
   - name: "ci-trigger"
     description: "Forward push and PR events to CI system"
     sources:
-      - org: "my-org"
-        repos: ["api-service", "web-app"]
+      - org: "octodemo"
+        repos: []
     events:
       - push
       - pull_request
+      - workflow_job
+      - workflow_run
     destination:
       url: "https://ci.example.com/github-webhook"
-      secret: "$CI_WEBHOOK_SECRET"
+      secret: "$GITHUB_WEBHOOK_SECRET"
       headers:
         X-Source: "gh-webhook-handler"
     retry:
       max_attempts: 5
-      backoff: "exponential"
-
-  - name: "security-alerts"
-    description: "Forward security events to SIEM"
-    sources:
-      - org: "my-org"
-        repos: []  # all repos
-    events:
-      - code_scanning_alert
-      - dependabot_alert
-      - secret_scanning_alert
-    destination:
-      url: "https://siem.example.com/ingest/github"
-      secret: "$SIEM_SECRET"
-    retry:
-      max_attempts: 10
       backoff: "exponential"
