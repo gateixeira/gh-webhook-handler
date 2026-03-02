@@ -31,6 +31,7 @@ type Destination struct {
 type RetryPolicy struct {
 	MaxAttempts int    `yaml:"max_attempts"`
 	Backoff     string `yaml:"backoff"`
+	MaxAge      string `yaml:"max_age"` // e.g. "2h", "30m" — parsed as time.Duration
 }
 
 // Config holds all loaded routes with thread-safe access.

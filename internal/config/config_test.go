@@ -230,3 +230,39 @@ func TestValidationInvalidBackoff(t *testing.T) {
 		t.Fatal("expected validation error for invalid backoff")
 	}
 }
+
+func TestValidMaxAge(t *testing.T) {
+	dir := t.TempDir()
+	writeYAML(t, dir, "ok.yaml", `routes:
+  - name: "with-max-age"
+    sources:
+      - org: "o"
+    events: [push]
+    destination:
+      url: "https://example.com"
+    retry:
+      max_age: "2h"
+`)
+	_, err := LoadDir(dir)
+	if err != nil {
+		t.Fatalf("expected no error for valid max_age, got: %v", err)
+	}
+}
+
+func TestValidationInvalidMaxAge(t *testing.T) {
+	dir := t.TempDir()
+	writeYAML(t, dir, "bad.yaml", `routes:
+  - name: "bad-max-age"
+    sources:
+      - org: "o"
+    events: [push]
+    destination:
+      url: "https://example.com"
+    retry:
+      max_age: "invalid"
+`)
+	_, err := LoadDir(dir)
+	if err == nil {
+		t.Fatal("expected validation error for invalid max_age")
+	}
+}

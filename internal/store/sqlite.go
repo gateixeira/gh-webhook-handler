@@ -34,12 +34,12 @@ func (s *SQLiteStore) Create(d *Delivery) error {
 	_, err := s.db.Exec(`INSERT INTO deliveries
 		(id, route_name, event_type, source_org, source_repo, delivery_id,
 		 payload_hash, payload, destination_url, status, response_code, response_body,
-		 attempt, max_attempts, next_retry_at, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+		 attempt, max_attempts, expires_at, next_retry_at, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
 		d.ID, d.RouteName, d.EventType, d.SourceOrg, d.SourceRepo,
 		d.DeliveryID, d.PayloadHash, d.Payload, d.DestinationURL, d.Status,
 		d.ResponseCode, d.ResponseBody, d.Attempt, d.MaxAttempts,
-		nullableTime(d.NextRetryAt))
+		nullableTime(d.ExpiresAt), nullableTime(d.NextRetryAt))
 	return err
 }
 
@@ -48,19 +48,19 @@ func (s *SQLiteStore) Update(d *Delivery) error {
 		route_name = ?, event_type = ?, source_org = ?, source_repo = ?,
 		delivery_id = ?, payload_hash = ?, payload = ?, destination_url = ?, status = ?,
 		response_code = ?, response_body = ?, attempt = ?, max_attempts = ?,
-		next_retry_at = ?, updated_at = datetime('now')
+		expires_at = ?, next_retry_at = ?, updated_at = datetime('now')
 		WHERE id = ?`,
 		d.RouteName, d.EventType, d.SourceOrg, d.SourceRepo,
 		d.DeliveryID, d.PayloadHash, d.Payload, d.DestinationURL, d.Status,
 		d.ResponseCode, d.ResponseBody, d.Attempt, d.MaxAttempts,
-		nullableTime(d.NextRetryAt), d.ID)
+		nullableTime(d.ExpiresAt), nullableTime(d.NextRetryAt), d.ID)
 	return err
 }
 
 func (s *SQLiteStore) Get(id string) (*Delivery, error) {
 	row := s.db.QueryRow(`SELECT id, route_name, event_type, source_org, source_repo,
 		delivery_id, payload_hash, payload, destination_url, status, response_code,
-		response_body, attempt, max_attempts, next_retry_at, created_at, updated_at
+		response_body, attempt, max_attempts, expires_at, next_retry_at, created_at, updated_at
 		FROM deliveries WHERE id = ?`, id)
 	return scanDelivery(row)
 }
@@ -68,7 +68,7 @@ func (s *SQLiteStore) Get(id string) (*Delivery, error) {
 func (s *SQLiteStore) List(filter ListFilter) ([]Delivery, error) {
 	query := `SELECT id, route_name, event_type, source_org, source_repo,
 		delivery_id, payload_hash, payload, destination_url, status, response_code,
-		response_body, attempt, max_attempts, next_retry_at, created_at, updated_at
+		response_body, attempt, max_attempts, expires_at, next_retry_at, created_at, updated_at
 		FROM deliveries WHERE 1=1`
 	var args []any
 
@@ -123,11 +123,12 @@ func (s *SQLiteStore) List(filter ListFilter) ([]Delivery, error) {
 func (s *SQLiteStore) GetRetryable(now time.Time) ([]Delivery, error) {
 	rows, err := s.db.Query(`SELECT id, route_name, event_type, source_org, source_repo,
 		delivery_id, payload_hash, payload, destination_url, status, response_code,
-		response_body, attempt, max_attempts, next_retry_at, created_at, updated_at
+		response_body, attempt, max_attempts, expires_at, next_retry_at, created_at, updated_at
 		FROM deliveries
 		WHERE status = 'failed' AND next_retry_at <= ? AND attempt < max_attempts
+		AND (expires_at IS NULL OR expires_at > ?)
 		ORDER BY next_retry_at ASC
-		LIMIT 100`, now.UTC().Format("2006-01-02 15:04:05"))
+		LIMIT 100`, now.UTC().Format("2006-01-02 15:04:05"), now.UTC().Format("2006-01-02 15:04:05"))
 	if err != nil {
 		return nil, err
 	}
@@ -175,19 +176,25 @@ type scanner interface {
 
 func scanDelivery(row *sql.Row) (*Delivery, error) {
 	var d Delivery
-	var nextRetry sql.NullString
+	var expiresAt, nextRetry sql.NullString
 	var createdAt, updatedAt string
 
 	err := row.Scan(&d.ID, &d.RouteName, &d.EventType, &d.SourceOrg, &d.SourceRepo,
 		&d.DeliveryID, &d.PayloadHash, &d.Payload, &d.DestinationURL, &d.Status,
 		&d.ResponseCode, &d.ResponseBody, &d.Attempt, &d.MaxAttempts,
-		&nextRetry, &createdAt, &updatedAt)
+		&expiresAt, &nextRetry, &createdAt, &updatedAt)
 	if err != nil {
 		return nil, err
 	}
 
 	d.CreatedAt = parseTime(createdAt)
 	d.UpdatedAt = parseTime(updatedAt)
+	if expiresAt.Valid {
+		t := parseTime(expiresAt.String)
+		if !t.IsZero() {
+			d.ExpiresAt = &t
+		}
+	}
 	if nextRetry.Valid {
 		t := parseTime(nextRetry.String)
 		if !t.IsZero() {
@@ -199,19 +206,25 @@ func scanDelivery(row *sql.Row) (*Delivery, error) {
 
 func scanDeliveryRows(rows *sql.Rows) (*Delivery, error) {
 	var d Delivery
-	var nextRetry sql.NullString
+	var expiresAt, nextRetry sql.NullString
 	var createdAt, updatedAt string
 
 	err := rows.Scan(&d.ID, &d.RouteName, &d.EventType, &d.SourceOrg, &d.SourceRepo,
 		&d.DeliveryID, &d.PayloadHash, &d.Payload, &d.DestinationURL, &d.Status,
 		&d.ResponseCode, &d.ResponseBody, &d.Attempt, &d.MaxAttempts,
-		&nextRetry, &createdAt, &updatedAt)
+		&expiresAt, &nextRetry, &createdAt, &updatedAt)
 	if err != nil {
 		return nil, err
 	}
 
 	d.CreatedAt = parseTime(createdAt)
 	d.UpdatedAt = parseTime(updatedAt)
+	if expiresAt.Valid {
+		t := parseTime(expiresAt.String)
+		if !t.IsZero() {
+			d.ExpiresAt = &t
+		}
+	}
 	if nextRetry.Valid {
 		t := parseTime(nextRetry.String)
 		if !t.IsZero() {

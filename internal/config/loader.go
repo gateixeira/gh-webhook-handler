@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -93,6 +94,11 @@ func validateRoutes(routes []Route) error {
 		}
 		if r.Retry.Backoff != "" && !validBackoffs[r.Retry.Backoff] {
 			return fmt.Errorf("route %q: backoff must be one of exponential, linear, fixed", r.Name)
+		}
+		if r.Retry.MaxAge != "" {
+			if _, err := time.ParseDuration(r.Retry.MaxAge); err != nil {
+				return fmt.Errorf("route %q: invalid max_age %q: %w", r.Name, r.Retry.MaxAge, err)
+			}
 		}
 	}
 	return nil

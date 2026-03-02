@@ -18,6 +18,7 @@ type Delivery struct {
 	ResponseBody   string
 	Attempt        int
 	MaxAttempts    int
+	ExpiresAt      *time.Time // if set, delivery expires and won't be retried after this time
 	NextRetryAt    *time.Time
 	CreatedAt      time.Time
 	UpdatedAt      time.Time

@@ -35,6 +35,7 @@ CREATE INDEX IF NOT EXISTS idx_deliveries_status ON deliveries(status);
 CREATE INDEX IF NOT EXISTS idx_deliveries_next_retry ON deliveries(status, next_retry_at);
 CREATE INDEX IF NOT EXISTS idx_deliveries_route ON deliveries(route_name);
 CREATE INDEX IF NOT EXISTS idx_deliveries_event ON deliveries(event_type);`},
+	{2, `ALTER TABLE deliveries ADD COLUMN expires_at DATETIME;`},
 }
 
 func runMigrations(db *sql.DB) error {

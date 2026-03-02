@@ -271,3 +271,56 @@ func TestClearPayloadsOlderThan(t *testing.T) {
 		t.Error("d-2 payload should still have data")
 	}
 }
+
+func TestGetRetryableExcludesExpired(t *testing.T) {
+	s := newTestStore(t)
+
+	past := time.Now().UTC().Add(-1 * time.Hour)
+	future := time.Now().UTC().Add(1 * time.Hour)
+	retryPast := time.Now().UTC().Add(-10 * time.Minute)
+
+	expired := &Delivery{
+		ID: "d-expired", RouteName: "r", EventType: "push",
+		DestinationURL: "https://a.com", Status: "failed",
+		Attempt: 1, MaxAttempts: 5, NextRetryAt: &retryPast, ExpiresAt: &past,
+	}
+	valid := &Delivery{
+		ID: "d-valid", RouteName: "r", EventType: "push",
+		DestinationURL: "https://b.com", Status: "failed",
+		Attempt: 1, MaxAttempts: 5, NextRetryAt: &retryPast, ExpiresAt: &future,
+	}
+	noExpiry := &Delivery{
+		ID: "d-no-expiry", RouteName: "r", EventType: "push",
+		DestinationURL: "https://c.com", Status: "failed",
+		Attempt: 1, MaxAttempts: 5, NextRetryAt: &retryPast, ExpiresAt: nil,
+	}
+
+	for _, d := range []*Delivery{expired, valid, noExpiry} {
+		if err := s.Create(d); err != nil {
+			t.Fatalf("Create %s: %v", d.ID, err)
+		}
+	}
+
+	got, err := s.GetRetryable(time.Now().UTC())
+	if err != nil {
+		t.Fatalf("GetRetryable: %v", err)
+	}
+
+	if len(got) != 2 {
+		t.Fatalf("GetRetryable returned %d deliveries, want 2", len(got))
+	}
+
+	ids := map[string]bool{}
+	for _, d := range got {
+		ids[d.ID] = true
+	}
+	if ids["d-expired"] {
+		t.Error("GetRetryable should not return expired delivery")
+	}
+	if !ids["d-valid"] {
+		t.Error("GetRetryable should return valid (non-expired) delivery")
+	}
+	if !ids["d-no-expiry"] {
+		t.Error("GetRetryable should return delivery with no expiry")
+	}
+}

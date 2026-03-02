@@ -26,3 +26,4 @@ routes:
     retry:
       max_attempts: 5
       backoff: "exponential"
+      max_age: "2h"

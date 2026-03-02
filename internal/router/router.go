@@ -4,6 +4,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gateixeira/gh-webhook-handler/internal/config"
 )
@@ -16,6 +17,7 @@ type MatchedRoute struct {
 	Headers        map[string]string
 	MaxAttempts    int
 	Backoff        string
+	MaxAge         time.Duration // 0 means no expiry
 }
 
 // Router evaluates incoming events against the loaded configuration.
@@ -46,6 +48,10 @@ func (r *Router) Match(org, repo, eventType string) []MatchedRoute {
 
 	matched := make([]MatchedRoute, 0, len(routes))
 	for _, rt := range routes {
+		var maxAge time.Duration
+		if rt.Retry.MaxAge != "" {
+			maxAge, _ = time.ParseDuration(rt.Retry.MaxAge) // already validated
+		}
 		matched = append(matched, MatchedRoute{
 			Name:           rt.Name,
 			DestinationURL: rt.Destination.URL,
@@ -53,6 +59,7 @@ func (r *Router) Match(org, repo, eventType string) []MatchedRoute {
 			Headers:        rt.Destination.Headers,
 			MaxAttempts:    rt.Retry.MaxAttempts,
 			Backoff:        rt.Retry.Backoff,
+			MaxAge:         maxAge,
 		})
 	}
 	return matched

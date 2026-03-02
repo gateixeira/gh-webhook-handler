@@ -61,6 +61,19 @@ func (e *Engine) processBatch(ctx context.Context) {
 	for i := range deliveries {
 		d := &deliveries[i]
 
+		// Check if delivery has expired (stale event).
+		if d.ExpiresAt != nil && time.Now().After(*d.ExpiresAt) {
+			d.Status = "expired"
+			d.Payload = nil
+			d.UpdatedAt = time.Now()
+			if err := e.store.Update(d); err != nil {
+				log.Printf("retry: failed to mark delivery %s as expired: %v", d.ID, err)
+			} else {
+				log.Printf("retry: delivery %s expired (created %s, max age exceeded)", d.ID, d.CreatedAt.Format(time.RFC3339))
+			}
+			continue
+		}
+
 		// Mark as retrying.
 		d.Status = "retrying"
 		d.UpdatedAt = time.Now()

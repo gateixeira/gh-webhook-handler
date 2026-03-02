@@ -70,6 +70,12 @@ func (f *Forwarder) Forward(ctx context.Context, route router.MatchedRoute, even
 		storedPayload = payload
 	}
 
+	var expiresAt *time.Time
+	if route.MaxAge > 0 {
+		t := time.Now().Add(route.MaxAge)
+		expiresAt = &t
+	}
+
 	d := &store.Delivery{
 		ID:             uuid.New().String(),
 		RouteName:      route.Name,
@@ -82,6 +88,7 @@ func (f *Forwarder) Forward(ctx context.Context, route router.MatchedRoute, even
 		ResponseBody:   result.ResponseBody,
 		Attempt:        1,
 		MaxAttempts:    route.MaxAttempts,
+		ExpiresAt:      expiresAt,
 		NextRetryAt:    nextRetry,
 		CreatedAt:      time.Now(),
 		UpdatedAt:      time.Now(),
