@@ -85,4 +85,25 @@ func (r *Reaper) run() {
 	} else if n > 0 {
 		slog.Info("reaper: deleted old permanently_failed deliveries", "count", n)
 	}
+
+	// 4. Clear payloads from stale circuit_open deliveries (destination never recovered).
+	if n, err := r.store.ClearPayloadsOlderThan("circuit_open", now.Add(-r.cfg.FailedPayloadMaxAge)); err != nil {
+		slog.Error("reaper: failed to clear old circuit_open payloads", "error", err)
+	} else if n > 0 {
+		slog.Info("reaper: cleared payloads from stale circuit_open deliveries", "count", n)
+	}
+
+	// 5. Delete very old circuit_open deliveries.
+	if n, err := r.store.DeleteOlderThan("circuit_open", now.Add(-r.cfg.FailedMaxAge)); err != nil {
+		slog.Error("reaper: failed to delete old circuit_open deliveries", "error", err)
+	} else if n > 0 {
+		slog.Info("reaper: deleted old circuit_open deliveries", "count", n)
+	}
+
+	// 6. Delete old expired deliveries.
+	if n, err := r.store.DeleteOlderThan("expired", now.Add(-r.cfg.SuccessMaxAge)); err != nil {
+		slog.Error("reaper: failed to delete old expired deliveries", "error", err)
+	} else if n > 0 {
+		slog.Info("reaper: deleted old expired deliveries", "count", n)
+	}
 }
